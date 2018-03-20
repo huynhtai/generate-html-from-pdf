@@ -1,8 +1,0 @@
-<component name="ArtifactManager">
-  <artifact type="jar" name="generatelink:jar">
-    <output-path>$PROJECT_DIR$/out/artifacts/generatelink_jar</output-path>
-    <root id="archive" name="generatelink.jar">
-      <element id="module-output" name="generatelink" />
-    </root>
-  </artifact>
-</component>
