@@ -1,8 +1,5 @@
 package com.company;
 
-import com.sun.xml.internal.bind.v2.runtime.reflect.opt.Const;
-import org.omg.PortableServer.THREAD_POLICY_ID;
-
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -20,24 +17,32 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 
+import static com.company.Main.COMMAND_PARAMETER;
+import static com.company.Main.COMMAND_RUN;
+
 public class Main {
     private static final String DOT = ".";
     private static final int MAX_PAGE_PER_BATCH = 6;
     private static final int NULL_CHAPTER_INDEX = -1;
-    private static final String FOLDER_SPLITTER = "\\";
+    private static final String FOLDER_SPLITTER = File.separator;
     private static final String BATCHES_OUTPUT_DIRECTORY = "batches";
-    private static final String OUTPUT_FOLDER = "htmls";
-    public static final int COVER_PAGE = -1;
-    public static final float DEFAULT_ZOOM = 1.0f;
-    private static final Pattern BATCH_PATTERN = Pattern.compile("(generateHtml)\\d*-\\d*(\\.bat)");
-    private static String lib = "\\lib\\pdf2HtmlEx.exe";
+    private static final String OUTPUT_FOLDER = "html";
+    private static final Pattern BATCH_PATTERN = Pattern.compile("(generateHtml)\\d*-\\d*(\\.(bat|sh))");
+    private static String lib = FOLDER_SPLITTER + "lib" + FOLDER_SPLITTER + "pdf2HtmlEx.exe";
     private static final int DEFAULT_MAX_THREAD = 8;
     private static final boolean DEFAULT_SEPARATE_FILE = true;
-
+    private static String currentDirectory = "";
     private static final Map<String, Parser> ARGUMENTS;
-    private static final Parser THREAD_PARSER = new IntegerParser(DEFAULT_MAX_THREAD, 1,50);
-    private static final Parser ZOOM_PARSER= new FloatParser(DEFAULT_ZOOM, 0.1f , -1);
+    private static final float DEFAULT_ZOOM = 1.0f;
+    private static final Parser THREAD_PARSER = new IntegerParser(DEFAULT_MAX_THREAD, 1, 50);
+    private static final Parser ZOOM_PARSER = new FloatParser(DEFAULT_ZOOM, 0.1f, -1);
     private static final Parser SEPARATE_PARSER = new BooleanParser(DEFAULT_SEPARATE_FILE);
+    public static final int COVER_PAGE = -1;
+    public static String COMMAND_DELIM = " & ";
+    public static String BATCH_FILE_EXTENSION = ".bat ";
+    public static String COMMAND_RUN = "cmd";
+    public static String COMMAND_PARAMETER = " /c ";
+
 
     static {
         ARGUMENTS = new HashMap<>();
@@ -73,8 +78,21 @@ public class Main {
         }
     }
 
+    private static void initCommandFormat(final boolean isLinux) {
+        COMMAND_DELIM = ";";
+        BATCH_FILE_EXTENSION = ".sh ";
+        COMMAND_RUN = "/bin/sh/";
+        COMMAND_PARAMETER = " -c ";
+    }
+
     private static void checkArgument(String[] args) {
-        for (int index = 2; index < args.length; index += 2) {
+        int index = 2;
+        while (index < args.length) {
+            if(args[index].trim().equalsIgnoreCase("-l")) {
+                initCommandFormat(true);
+                index++;
+                continue;
+            }
             Parser argumentParser = ARGUMENTS.get(args[index]);
             if (argumentParser == null) {
                 throw new IllegalArgumentException(String.format("Argument %1 is invalid.", args[index]));
@@ -89,10 +107,12 @@ public class Main {
             } catch (IllegalArgumentException ex) {
                 throw new IllegalArgumentException("Something wrong with args [" + args[index] + "] " + ex.getMessage
                         ());
-            } catch(Exception ex) {
+            } catch (Exception ex) {
                 throw new IllegalArgumentException(String.format("Wrong value for argument %1", args[index]));
             }
+            index+=2;
         }
+
     }
 
     static private void deleteAllFiles(final String directory) {
@@ -100,8 +120,8 @@ public class Main {
         if (batDir.isDirectory()) {
             File[] files = batDir.listFiles();
             for (File file : files) {
-                if(file.isDirectory()) {
-                   deleteAllFiles(file.getAbsolutePath());
+                if (file.isDirectory()) {
+                    deleteAllFiles(file.getAbsolutePath());
                 } else {
                     file.delete();
                 }
@@ -109,36 +129,62 @@ public class Main {
         }
     }
 
-    private static void isExistFile(final String filePath) {
+    private static boolean isExistedFile(String filePath) {
         File file = new File(filePath);
-        if(!file.exists()) {
-            throw new IllegalArgumentException(String.format("File \"%s\" is non-existed", filePath));
+        if (!file.isAbsolute()) {
+            filePath = currentDirectory + FOLDER_SPLITTER + filePath;
         }
+        return file.exists();
     }
 
-    private static void isExtension(final String filePath, final FILE_EXTENSION expectedExtension) {
+    private static String getFilePathIfRelative(final String filePath) {
+        File file = new File(filePath);
+        if (!file.isAbsolute()) {
+            return currentDirectory + FOLDER_SPLITTER + filePath;
+        }
+
+        return filePath;
+    }
+
+    private static void checkExtension(final String filePath, final FILE_EXTENSION expectedExtension) {
         int lastIndexOfDot = filePath.lastIndexOf(DOT);
         if (lastIndexOfDot + 1 > filePath.length()) {
             throw new IllegalArgumentException(String.format("Expected: '.%s' but got file %s", expectedExtension
                     .getExtension(), filePath));
         }
         final String extension = filePath.substring(lastIndexOfDot + 1);
-         if (!expectedExtension.isSimilarExtension(extension)) {
-             throw new IllegalArgumentException(String.format("Expected: '.%s' but got file %s", expectedExtension
-                     .getExtension(), filePath));
-         }
+        if (!expectedExtension.isSimilarExtension(extension)) {
+            throw new IllegalArgumentException(String.format("Expected: '.%s' but got file %s", expectedExtension
+                    .getExtension(), filePath));
+        }
     }
 
     private static void checkInputFiles(final String[] args) {
-        isExtension(args[0], FILE_EXTENSION.TXT);
-        isExistFile(args[0]);
-        isExtension(args[1], FILE_EXTENSION.PDF);
-        isExistFile(args[1]);
+        checkExtension(args[0], FILE_EXTENSION.TXT);
+        if (!isExistedFile(args[0])) {
+            if (isExistedFile(currentDirectory + FOLDER_SPLITTER + args[0])) {
+                args[0] = currentDirectory + FOLDER_SPLITTER + args[0];
+            } else {
+                throw new IllegalArgumentException(String.format("File '%s' is not existed.", args[0]));
+            }
+        }
+        checkExtension(args[1], FILE_EXTENSION.PDF);
+        if (!isExistedFile(args[1])) {
+            throw new IllegalArgumentException(String.format("File '%s' is not existed.", args[0]));
+        }
     }
 
     private static RESULT initArgument(final String[] args) {
-        if (args == null || args.length < 2) {
-            return RESULT.FAIL;
+        if (args == null || args.length == 0) {
+            throw new IllegalArgumentException("");
+        }
+
+        if (args[0].trim().equalsIgnoreCase("--help")) {
+            throw new IllegalArgumentException("");
+        }
+
+        if (args.length < 2) {
+            throw new IllegalArgumentException("");
         }
 
         checkInputFiles(args);
@@ -153,13 +199,14 @@ public class Main {
 
     private static void checkLib(final String currentDir) {
         File file = new File(currentDir + lib);
-        if(!file.exists()) {
+        if (!file.exists()) {
             throw new IllegalArgumentException("Do not delete any folder in this lib");
         }
     }
 
+
     public static void main(String[] args) {
-        String currentDirectory = System.getProperty("user.dir");
+        currentDirectory = System.getProperty("user.dir");
         try {
             initArgument(args);
             checkLib(currentDirectory);
@@ -169,6 +216,10 @@ public class Main {
             printHelp();
             return;
         }
+
+        // get file path
+        args[0] = getFilePathIfRelative(args[0]);
+        args[1] = getFilePathIfRelative(args[1]);
 
         // create command
         final List<Chapter> chapters = readAllChapter(args[0]);
@@ -225,13 +276,13 @@ public class Main {
             final File filebat = new File(currentDirectory +
                     FOLDER_SPLITTER +
                     BATCHES_OUTPUT_DIRECTORY +
-                    "\\generateHtml" +
+                    FOLDER_SPLITTER + "generateHtml" +
                     // TODO fix this. Change pattern if you have internet
                     (chapterIndex == COVER_PAGE ? 0 : chapterIndex) +
                     "-" +
                     part +
                     "" +
-                    ".bat");
+                    BATCH_FILE_EXTENSION);
             filebat.getParentFile().mkdirs();
             filebat.createNewFile();
             BufferedWriter writer = new BufferedWriter(new FileWriter(filebat));
@@ -240,7 +291,7 @@ public class Main {
                 writePage(writer, 1, 1, "cover.html", pdf2HtmlExLibPath, zoomInString,
                         currentDirectory, pdfFilePath, chapterIndex);
             } else {
-                if ((Boolean)SEPARATE_PARSER.getValue()) {
+                if ((Boolean) SEPARATE_PARSER.getValue()) {
                     int htmlPageIndex = (part - 1) * MAX_PAGE_PER_BATCH;
                     for (int index = 0; index + startPage <= endPage; index++) {
                         writePage(writer, index + startPage, index + startPage, (index + htmlPageIndex) + ".html",
@@ -248,7 +299,7 @@ public class Main {
                                 zoomInString,
                                 currentDirectory, pdfFilePath, chapterIndex);
                         if ((index + startPage) != endPage) {
-                            writer.append(" & ");
+                            writer.append(COMMAND_DELIM);
                         }
                     }
                 } else {
@@ -278,7 +329,7 @@ public class Main {
         writer.append(" --dest-dir ");
         writer.append(" " + currentDir + FOLDER_SPLITTER + OUTPUT_FOLDER);
         if (chapterIndex != NULL_CHAPTER_INDEX) {
-            writer.append("\\" + chapterIndex + " ");
+            writer.append(FOLDER_SPLITTER + chapterIndex + " ");
         }
         writer.append(" " + pdfFilePath);
         writer.append(" " + outputFileName + " ");
@@ -298,7 +349,7 @@ public class Main {
                     fileJSON.createNewFile();
                     BufferedWriter bufferedWriter = new BufferedWriter((new FileWriter(fileJSON)));
                     bufferedWriter.append("export var data = ");
-                    bufferedWriter.append("{ pages: ");
+                    bufferedWriter.append("{ \"chapters\": ");
                     bufferedWriter.append("\t[ \n");
                     Iterator<Chapter> iterator = chapters.iterator();
                     int num = 0;
@@ -351,8 +402,6 @@ public class Main {
                     } catch (InterruptedException ex) {
                         System.out.println("Serious Error");
                     }
-
-
                 }
 
             }
@@ -399,6 +448,7 @@ public class Main {
         System.out.println("-t numberOfThread (optional): is number of thread to handle( Default value is 8).");
         System.out.println("-z value to zoom(optional): zoom level of page( Default value is 1.0).");
         System.out.println("-s Separate each file (optional): Separate each page to a html file( Default value is 0)");
+        System.out.println("-l runnning in linux");
     }
 
     private class Arguments {
@@ -443,13 +493,14 @@ class NewThread implements Callable<Integer> {
 
 
     private void deleteFile() {
-        File file = new File(this.directory + "\\" + this.fileName);
+        String url = this.directory + File.separator + this.fileName;
+        File file = new File(url);
         file.deleteOnExit();
     }
 
     @Override
     public Integer call() throws Exception {
-        final ProcessBuilder processBuilder = new ProcessBuilder("cmd ", " /c ",
+        final ProcessBuilder processBuilder = new ProcessBuilder(COMMAND_RUN, COMMAND_PARAMETER,
                 fileName);
         processBuilder.directory(new File(this.directory));
 
@@ -525,17 +576,18 @@ class FloatParser implements Parser {
 
     public void convert(final String valueInString) {
         float value = Float.parseFloat(valueInString);
-        if(maxValue != -1 && value > maxValue) {
+        if (maxValue != -1 && value > maxValue) {
             throw new IllegalArgumentException(String.format("the value [%s] must be less than %f", valueInString,
                     maxValue));
         }
-        if(minValue != -1 && value < minValue) {
+        if (minValue != -1 && value < minValue) {
             throw new IllegalArgumentException(String.format("the value %s must be grater than %f", valueInString,
                     minValue));
         }
         this.value = value;
     }
-    public Float getValue(){
+
+    public Float getValue() {
         return this.value;
     }
 }
@@ -557,17 +609,18 @@ class IntegerParser implements Parser {
 
     public void convert(final String valueInString) {
         final Integer newValue = Integer.valueOf(valueInString);
-        if(maxValue != -1 && value > maxValue) {
+        if (maxValue != -1 && value > maxValue) {
             throw new IllegalArgumentException(String.format("the value %s must be less than %d", valueInString,
                     maxValue));
         }
-        if(minValue != -1 && value < minValue) {
+        if (minValue != -1 && value < minValue) {
             throw new IllegalArgumentException(String.format("the value %s must be grater than %d", valueInString,
                     minValue));
         }
         this.value = newValue;
     }
-    public Integer getValue(){
+
+    public Integer getValue() {
         return this.value;
     }
 }
@@ -583,7 +636,7 @@ class BooleanParser implements Parser {
         this.value = Boolean.valueOf(valueInString);
     }
 
-    public Boolean getValue(){
+    public Boolean getValue() {
         return this.value;
     }
 }
