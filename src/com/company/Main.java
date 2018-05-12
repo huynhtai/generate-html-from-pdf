@@ -424,7 +424,7 @@ public class Main {
                 if(firstLastString == null || firstLastString.isEmpty()) {
                     continue;
                 }
-                String[] firstlast = bufferedReader.readLine().split(" ");
+                String[] firstlast = firstLastString.split(" ");
                 chapter.setFirst(Integer.valueOf(firstlast[0]));
                 if (firstlast.length < 2) {
                     chapter.setLast(Integer.valueOf(firstlast[0]));
