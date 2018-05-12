@@ -417,9 +417,13 @@ public class Main {
             FileReader fileReader = new FileReader(link);
             BufferedReader bufferedReader = new BufferedReader(fileReader);
             String line;
-            while ((line = bufferedReader.readLine()) != null) {
+            while ((line = bufferedReader.readLine()) != null && !line.isEmpty()) {
                 Chapter chapter = new Chapter();
                 chapter.setName(line);
+                final String firstLastString = bufferedReader.readLine();
+                if(firstLastString == null || firstLastString.isEmpty()) {
+                    continue;
+                }
                 String[] firstlast = bufferedReader.readLine().split(" ");
                 chapter.setFirst(Integer.valueOf(firstlast[0]));
                 if (firstlast.length < 2) {
